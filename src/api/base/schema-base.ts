@@ -70,11 +70,15 @@ export function getCommonErrorStatus(error: unknown): CommonStatus {
         : '';
     const message = error instanceof Error ? error.message : String(error);
 
+    if (/resolve_error|_module_not_found|module not found/i.test(message)) {
+        return COMMON_STATUS.BAD_REQUEST;
+    }
+
     if (code === 'ENOENT' || /ENOENT|no such file or directory|not found|not exist|cannot find|can not find|can not be found/i.test(message)) {
         return COMMON_STATUS.NOT_FOUND;
     }
 
-    if (/parameter error|filename cannot be empty|invalid url|invalid .*content|unsafe file path|extension mismatch|cannot resolve/i.test(message)) {
+    if (/parameter error|filename cannot be empty|invalid url|invalid .*content|unsafe file path|extension mismatch|cannot resolve|already exists|multiple \(\d+\) occurrences found|no replacement was performed|did not appear verbatim|file is not changed/i.test(message)) {
         return COMMON_STATUS.BAD_REQUEST;
     }
 

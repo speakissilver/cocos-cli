@@ -5,7 +5,10 @@ const mockCreateAsset = jest.fn();
 const mockCreateAssetByType = jest.fn();
 const mockImportAsset = jest.fn();
 const mockSaveAsset = jest.fn();
+const mockQueryPath = jest.fn();
 const mockQueryLinesInFile = jest.fn();
+const mockEraseLinesInRange = jest.fn();
+const mockReplaceTextInFile = jest.fn();
 const mockNodeQuery = jest.fn();
 const mockNodeDelete = jest.fn();
 const mockComponentQuery = jest.fn();
@@ -28,13 +31,14 @@ jest.mock('../src/core/assets', () => ({
         createAssetByType: (...args: unknown[]) => mockCreateAssetByType(...args),
         importAsset: (...args: unknown[]) => mockImportAsset(...args),
         saveAsset: (...args: unknown[]) => mockSaveAsset(...args),
+        queryPath: (...args: unknown[]) => mockQueryPath(...args),
     },
 }));
 
 jest.mock('../src/core/filesystem/file-edit', () => ({
     insertTextAtLine: jest.fn(),
-    eraseLinesInRange: jest.fn(),
-    replaceTextInFile: jest.fn(),
+    eraseLinesInRange: (...args: unknown[]) => mockEraseLinesInRange(...args),
+    replaceTextInFile: (...args: unknown[]) => mockReplaceTextInFile(...args),
     queryLinesInFile: (...args: unknown[]) => mockQueryLinesInFile(...args),
 }));
 
@@ -78,7 +82,10 @@ describe('Bug #497 common API error status codes', () => {
         mockCreateAssetByType.mockReset();
         mockImportAsset.mockReset();
         mockSaveAsset.mockReset();
+        mockQueryPath.mockReset();
         mockQueryLinesInFile.mockReset();
+        mockEraseLinesInRange.mockReset();
+        mockReplaceTextInFile.mockReset();
         mockNodeQuery.mockReset();
         mockNodeDelete.mockReset();
         mockComponentQuery.mockReset();
@@ -96,7 +103,17 @@ describe('Bug #497 common API error status codes', () => {
         expect(getCommonErrorStatus(new Error('Invalid scene/prefab asset content: invalid JSON'))).toBe(COMMON_STATUS.BAD_REQUEST);
         expect(getCommonErrorStatus(new Error('Filename cannot be empty.'))).toBe(COMMON_STATUS.BAD_REQUEST);
         expect(getCommonErrorStatus(new Error('parameter error'))).toBe(COMMON_STATUS.BAD_REQUEST);
+        expect(getCommonErrorStatus(new Error('file GameManager.ts already exists, please use overwrite option'))).toBe(COMMON_STATUS.BAD_REQUEST);
         expect(getCommonErrorStatus(new Error('unexpected internal crash'))).toBe(COMMON_STATUS.FAIL);
+    });
+
+    it('classifies script module resolution failures as bad requests', () => {
+        expect(getCommonErrorStatus(new Error('(i18n needed)resolve_error _module_not_found: {"specifier":"../core/GameEvent"}'))).toBe(COMMON_STATUS.BAD_REQUEST);
+    });
+
+    it('classifies text replacement targeting failures as bad requests', () => {
+        expect(getCommonErrorStatus(new Error('Multiple (2) occurrences found. File is not changed.'))).toBe(COMMON_STATUS.BAD_REQUEST);
+        expect(getCommonErrorStatus(new Error('No replacement was performed, TargetText foo did not appear verbatim in D:\\project\\assets\\scripts\\Game.ts.'))).toBe(COMMON_STATUS.BAD_REQUEST);
     });
 
     it('returns 404 when detailed asset info is not found', async () => {
@@ -193,6 +210,28 @@ describe('Bug #497 common API error status codes', () => {
         expect(result.reason).toContain('cannot find asset');
     });
 
+    it('returns 400 when querying asset path with a parameter error', async () => {
+        mockQueryPath.mockImplementation(() => {
+            throw new Error('parameter error');
+        });
+
+        const result = await new AssetsApi().queryPath('bad');
+
+        expect(result.code).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(result.data).toBeNull();
+        expect(result.reason).toBe('parameter error');
+    });
+
+    it('returns 404 when querying asset path cannot resolve a path', async () => {
+        mockQueryPath.mockReturnValue('');
+
+        const result = await new AssetsApi().queryPath('assets/resources/Image/missing.png');
+
+        expect(result.code).toBe(HTTP_STATUS.NOT_FOUND);
+        expect(result.data).toBeNull();
+        expect(result.reason).toContain('Asset path can not be found');
+    });
+
     it('returns 400 when saving invalid scene or prefab content', async () => {
         mockSaveAsset.mockRejectedValue(new Error('Invalid scene/prefab asset content: invalid JSON: Unexpected token'));
 
@@ -232,6 +271,50 @@ describe('Bug #497 common API error status codes', () => {
 
         expect(result.code).toBe(HTTP_STATUS.BAD_REQUEST);
         expect(result.reason).toBe('Filename cannot be empty.');
+    });
+
+    it('returns 400 when deleting file text triggers a script module resolution failure', async () => {
+        mockEraseLinesInRange.mockRejectedValue(new Error('(i18n needed)resolve_error _module_not_found: {"specifier":"../core/GameEvent"}'));
+
+        const result = await new FileEditorApi().eraseLinesInRange({
+            dbURL: 'db://assets/scripts/board/BoardController.ts',
+            fileType: 'ts',
+            startLine: 1,
+            endLine: 2,
+        });
+
+        expect(result.code).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(result.reason).toContain('_module_not_found');
+    });
+
+    it('returns 400 when replacing file text matches multiple occurrences', async () => {
+        mockReplaceTextInFile.mockRejectedValue(new Error('Multiple (2) occurrences found. File is not changed.'));
+
+        const result = await new FileEditorApi().replaceTextInFile({
+            dbURL: 'db://assets/scripts/Game.ts',
+            fileType: 'ts',
+            targetText: 'this.score = 0;',
+            replacementText: 'this.score = 1;',
+            regex: false,
+        });
+
+        expect(result.code).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(result.reason).toContain('Multiple (2) occurrences found');
+    });
+
+    it('returns 400 when replacing file text finds no verbatim match', async () => {
+        mockReplaceTextInFile.mockRejectedValue(new Error('No replacement was performed, TargetText this.score = 0; did not appear verbatim in D:\\project\\assets\\scripts\\Game.ts.'));
+
+        const result = await new FileEditorApi().replaceTextInFile({
+            dbURL: 'db://assets/scripts/Game.ts',
+            fileType: 'ts',
+            targetText: 'this.score = 0;',
+            replacementText: 'this.score = 1;',
+            regex: false,
+        });
+
+        expect(result.code).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(result.reason).toContain('No replacement was performed');
     });
 
     it('returns 404 when a queried node is not found', async () => {

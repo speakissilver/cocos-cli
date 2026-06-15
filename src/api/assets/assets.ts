@@ -304,7 +304,7 @@ export class AssetsApi {
 
     @tool('assets-create-asset')
     @title('Create Asset') // 创建资源
-    @description('Create asset based on actual address and file content') // 根据实际地址和文件内容创建资源
+    @description('Create a Cocos asset from file content or a template. Set options.target to an asset-db URL such as db://assets/scripts/GameManager.ts, or to an absolute file path inside an asset database root. Do not pass a web URL or a plain relative path as target.') // 根据文件内容或模板创建 Cocos 资源。options.target 使用 db://assets/scripts/GameManager.ts 这类 asset-db URL，或位于资源数据库根目录内的绝对路径；不要传 Web URL 或普通相对路径。
     @result(SchemaCreatedAssetResult)
     async createAsset(
         @param(SchemaCreateAssetOptions) options: TCreateAssetOptions
@@ -438,9 +438,9 @@ export class AssetsApi {
      */
     @tool('assets-query-path')
     @title('Query Asset File Path') // 查询资源文件路径
-    @description('Query the actual path of an asset in the file system based on its URL or UUID. Returns an absolute path string.') // 根据资源的 URL 或 UUID 查询资源在文件系统中的实际路径。返回绝对路径字符串。
+    @description('Query the actual path of an asset in the file system based on its URL, UUID, or asset-db relative path such as assets/resources/Image/a.png. Returns an absolute path string.') // 根据资源的 URL、UUID 或 asset-db 相对路径查询资源在文件系统中的实际路径。返回绝对路径字符串。
     @result(SchemaPathResult)
-    async queryPath(@param(SchemaUrlOrUUID) urlOrUuid: TUrlOrUUID): Promise<CommonResultType<TPathResult>> {
+    async queryPath(@param(SchemaUrlOrUUIDOrPath) urlOrUuid: TUrlOrUUIDOrPath): Promise<CommonResultType<TPathResult>> {
         const code: HttpStatusCode = COMMON_STATUS.SUCCESS;
         const ret: CommonResultType<TPathResult> = {
             code: code,
@@ -449,8 +449,13 @@ export class AssetsApi {
 
         try {
             ret.data = assetManager.queryPath(urlOrUuid);
+            if (!ret.data) {
+                ret.code = COMMON_STATUS.NOT_FOUND;
+                ret.data = null;
+                ret.reason = `Asset path can not be found: ${urlOrUuid}. Please refresh asset db and try again.`;
+            }
         } catch (e) {
-            ret.code = COMMON_STATUS.FAIL;
+            ret.code = getCommonErrorStatus(e);
             console.error('query path fail:', e instanceof Error ? e.message : String(e));
             ret.reason = e instanceof Error ? e.message : String(e);
         }
